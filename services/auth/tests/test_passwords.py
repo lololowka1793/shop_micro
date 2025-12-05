@@ -1,4 +1,4 @@
-from main import get_password_hash, verify_password
+from services.auth.main import get_password_hash, verify_password
 
 def test_hash_and_verify_password():
     password = "pass123"

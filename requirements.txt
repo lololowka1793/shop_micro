@@ -7,3 +7,5 @@ PyJWT
 passlib[bcrypt]
 email-validator
 bcrypt
+pydantic[email]
+pytest

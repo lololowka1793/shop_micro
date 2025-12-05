@@ -1,7 +1,7 @@
 import jwt
-from main import create_access_token, AUTH_SECRET_KEY, AUTH_ALGORITHM
+from services.auth.main import create_access_token, AUTH_SECRET_KEY, AUTH_ALGORITHM
 
-def test_create_access_token_contains_sub_and_role():
+def test_create_access_token_contains_role_and_sub():
     token = create_access_token({"sub": "alice", "role": "user"})
     payload = jwt.decode(token, AUTH_SECRET_KEY, algorithms=[AUTH_ALGORITHM])
 

@@ -1,1 +1,3 @@
-git branch -M main
+pytest
+pytest-asyncio
+httpx
