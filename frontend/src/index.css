@@ -1,0 +1,25 @@
+/* src/index.css */
+
+/* базовые настройки */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+/* делаем фон и текст для всей страницы */
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #020617; /* тёмный фон */
+  color: #e5e7eb;      /* светлый текст */
+}
+
+/* убираем max-width и центрирование, растягиваем на весь экран */
+#root {
+  min-height: 100vh;
+}

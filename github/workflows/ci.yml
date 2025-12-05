@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  compose-build-and-smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Docker versions
+        run: |
+          docker --version
+          docker compose version
+
+      - name: Prepare sqlite files for bind mounts
+        run: |
+          mkdir -p services/auth services/users services/catalog services/orders
+          touch services/auth/auth.db
+          touch services/users/users.db
+          touch services/catalog/catalog.db
+          touch services/orders/orders.db
+
+      - name: Build images
+        run: docker compose build
+
+      - name: Start services
+        run: docker compose up -d
+
+      - name: Wait for gateway
+        run: |
+          for i in {1..30}; do
+            if curl -sSf http://localhost:8000/health > /dev/null; then
+              echo "Gateway is up"
+              exit 0
+            fi
+            echo "Waiting for gateway..."
+            sleep 2
+          done
+          echo "Gateway did not start in time"
+          docker compose logs --no-color
+          exit 1
+
+      - name: Smoke test auth register/login
+        run: |
+          # регистрация (может упасть если уже был создан пользователь — это нормально)
+          curl -sS -X POST http://localhost:8001/register \
+            -H "Content-Type: application/json" \
+            -d '{"username":"ci_user","email":"ci_user@example.com","password":"pass123"}' || true
+
+          # логин должен пройти
+          curl -sSf -X POST http://localhost:8001/login \
+            -H "Content-Type: application/json" \
+            -d '{"username":"ci_user","password":"pass123"}'
+
+      - name: Smoke test gateway endpoints
+        run: |
+          curl -sSf http://localhost:8000/health
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop services
+        if: always()
+        run: docker compose down

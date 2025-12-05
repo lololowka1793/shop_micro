@@ -1,0 +1,92 @@
+services:
+  auth:
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    container_name: shop_micro-auth
+    ports:
+      - "8001:8001"
+    environment:
+      - USERS_SERVICE_URL=http://users:8002
+      - AUTH_SECRET_KEY=dev_secret_change_me
+      - AUTH_ALGORITHM=HS256
+      - AUTH_ACCESS_TOKEN_EXPIRE_MINUTES=60
+    depends_on:
+      - users
+    volumes:
+      # чтобы после перезапуска docker не пропадали auth-пользователи
+      - ./services/auth/auth.db:/app/auth.db
+
+  users:
+    build:
+      context: .
+      dockerfile: services/users/Dockerfile
+    container_name: shop_micro-users
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./services/users/users.db:/app/users.db
+
+  catalog:
+    build:
+      context: .
+      dockerfile: services/catalog/Dockerfile
+    container_name: shop_micro-catalog
+    ports:
+      - "8003:8003"
+    volumes:
+      - ./services/catalog/catalog.db:/app/catalog.db
+
+  orders:
+    build:
+      context: .
+      dockerfile: services/orders/Dockerfile
+    container_name: shop_micro-orders
+    ports:
+      - "8004:8004"
+    environment:
+      - NOTIFICATIONS_SERVICE_URL=http://notifications:8006
+    volumes:
+      - ./services/orders/orders.db:/app/orders.db
+    depends_on:
+      - notifications
+
+  notifications:
+    build:
+      context: .
+      dockerfile: services/notifications/Dockerfile
+    container_name: shop_micro-notifications
+    ports:
+      - "8006:8006"
+
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    container_name: shop_micro-gateway
+    ports:
+      - "8000:8000"
+    depends_on:
+      - auth
+      - users
+      - catalog
+      - orders
+      - notifications
+    environment:
+      - AUTH_SERVICE_URL=http://auth:8001
+      - USERS_SERVICE_URL=http://users:8002
+      - CATALOG_SERVICE_URL=http://catalog:8003
+      - ORDERS_SERVICE_URL=http://orders:8004
+      - NOTIFICATIONS_SERVICE_URL=http://notifications:8006
+      - AUTH_SECRET_KEY=dev_secret_change_me
+      - AUTH_ALGORITHM=HS256
+
+  frontend:
+    build:
+      context: .
+      dockerfile: services/frontend/Dockerfile
+    container_name: shop_micro-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - gateway
