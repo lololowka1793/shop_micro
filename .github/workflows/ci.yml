@@ -5,17 +5,35 @@ on:
   pull_request:
 
 jobs:
-  compose-build-and-smoke:
+  unit-tests:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show Docker versions
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
         run: |
-          docker --version
-          docker compose version
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run unit tests
+        run: |
+          pytest -q
+
+  compose-smoke:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Prepare sqlite files for bind mounts
         run: |
@@ -47,21 +65,19 @@ jobs:
 
       - name: Smoke test auth register/login
         run: |
-          # регистрация (может упасть если уже был создан пользователь — это нормально)
           curl -sS -X POST http://localhost:8001/register \
             -H "Content-Type: application/json" \
             -d '{"username":"ci_user","email":"ci_user@example.com","password":"pass123"}' || true
 
-          # логин должен пройти
           curl -sSf -X POST http://localhost:8001/login \
             -H "Content-Type: application/json" \
             -d '{"username":"ci_user","password":"pass123"}'
 
-      - name: Smoke test gateway endpoints
+      - name: Smoke test gateway
         run: |
           curl -sSf http://localhost:8000/health
 
-      - name: Show logs on failure
+      - name: Logs on failure
         if: failure()
         run: docker compose logs --no-color
 
