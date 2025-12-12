@@ -1,188 +1,61 @@
-name: CI
+name: CI-CD
 
 on:
   push:
+    branches: [ main, master ]
   pull_request:
 
-permissions:
-  contents: read
-  packages: write
-
 jobs:
-  # -------------------- 1. Юнит-тесты (CI) --------------------
-  unit-tests:
+  tests:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.10"
 
       - name: Install dependencies
         run: |
-          python -m venv .venv
-          source .venv/bin/activate
-          pip install --upgrade pip
-          pip install -r services/requirements.txt
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Run pytest
-        run: |
-          source .venv/bin/activate
-          pytest
+      - name: Run tests
+        run: pytest
 
-  # -------------------- 2. Docker compose smoke (CI) --------------------
-  compose-build-and-smoke:
+  docker-build:
+    # Запускаем сборку образов только если тесты прошли
+    needs: tests
+    # И только для main/master, чтобы не гонять сборку на каждый PR
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
-    needs: unit-tests
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Show Docker versions
+      - name: Build Docker images for services
         run: |
-          docker --version
-          docker compose version
+          echo "Building auth image..."
+          docker build -f services/auth/Dockerfile          -t task_auth .
 
-      - name: Build images
-        run: docker compose build
+          echo "Building users image..."
+          docker build -f services/users/Dockerfile         -t task_users .
 
-      - name: Start services
-        run: docker compose up -d
+          echo "Building projects image..."
+          docker build -f services/projects/Dockerfile      -t task_projects .
 
-      - name: Wait for gateway
-        run: |
-          for i in {1..30}; do
-            if curl -sSf http://localhost:8000/health > /dev/null; then
-              echo "Gateway is up"
-              exit 0
-            fi
-            echo "Waiting for gateway..."
-            sleep 2
-          done
-          echo "Gateway did not start in time"
-          docker compose logs
-          exit 1
+          echo "Building tasks image..."
+          docker build -f services/tasks/Dockerfile         -t task_tasks .
 
-      - name: Smoke test /health of all services via gateway
-        run: |
-          curl -sSf http://localhost:8000/health
-          curl -sSf http://localhost:8000/summary || true
+          echo "Building comments image..."
+          docker build -f services/comments/Dockerfile      -t task_comments .
 
-      - name: Stop services
-        if: always()
-        run: docker compose down
+          echo "Building notifications image..."
+          docker build -f services/notifications/Dockerfile -t task_notifications .
 
-      - name: Smoke test auth register/login
-        run: |
-          curl -sSf -X POST http://localhost:8001/register \
-            -H "Content-Type: application/json" \
-            -d '{"username":"ci_user","email":"ci_user@example.com","password":"pass123"}' || true
-
-          curl -sSf -X POST http://localhost:8001/login \
-            -H "Content-Type: application/json" \
-            -d '{"username":"ci_user","password":"pass123"}'
-
-  # -------------------- 3. CD: билд и push Docker-образов --------------------
-  build-and-push-images:
-    name: Build & push Docker images (CD)
-    runs-on: ubuntu-latest
-    needs:
-      - unit-tests
-    # чтобы CD срабатывал только на push в main (а не на PR)
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # ---------- auth ----------
-      - name: Build & push auth image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: services/auth/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/shop_micro-auth:latest
-            ghcr.io/${{ github.repository_owner }}/shop_micro-auth:${{ github.sha }}
-
-      # ---------- users ----------
-      - name: Build & push users image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: services/users/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/shop_micro-users:latest
-            ghcr.io/${{ github.repository_owner }}/shop_micro-users:${{ github.sha }}
-
-      # ---------- catalog ----------
-      - name: Build & push catalog image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: services/catalog/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/shop_micro-catalog:latest
-            ghcr.io/${{ github.repository_owner }}/shop_micro-catalog:${{ github.sha }}
-
-      # ---------- orders ----------
-      - name: Build & push orders image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: services/orders/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/shop_micro-orders:latest
-            ghcr.io/${{ github.repository_owner }}/shop_micro-orders:${{ github.sha }}
-
-      # ---------- notifications ----------
-      - name: Build & push notifications image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: services/notifications/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/shop_micro-notifications:latest
-            ghcr.io/${{ github.repository_owner }}/shop_micro-notifications:${{ github.sha }}
-
-      # ---------- gateway ----------
-      - name: Build & push gateway image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: services/gateway/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/shop_micro-gateway:latest
-            ghcr.io/${{ github.repository_owner }}/shop_micro-gateway:${{ github.sha }}
-
-      # ---------- frontend ----------
-      - name: Build & push frontend image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: services/frontend/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/shop_micro-frontend:latest
-            ghcr.io/${{ github.repository_owner }}/shop_micro-frontend:${{ github.sha }}
+          echo "Building gateway image..."
+          docker build -f services/gateway/Dockerfile       -t task_gateway .
