@@ -6,3 +6,4 @@ pydantic
 bcrypt
 PyJWT
 pytest
+email-validator
