@@ -4,47 +4,37 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
+  # -------------------- 1. Юнит-тесты (CI) --------------------
   unit-tests:
     runs-on: ubuntu-latest
-    env:
-      PYTHONPATH: .
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
 
-      # Вариант A (если у тебя есть общий requirements.txt в корне)
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-
-      # Вариант B (если requirements лежат по сервисам) — раскомментируй
-      # - name: Install service dependencies
-      #   run: |
-      #     python -m pip install --upgrade pip
-      #     pip install -r services/auth/requirements.txt
-      #     pip install -r services/users/requirements.txt
-      #     pip install -r services/catalog/requirements.txt
-      #     pip install -r services/orders/requirements.txt
-      #     pip install -r services/gateway/requirements.txt
-      #     pip install -r services/notifications/requirements.txt
-      #
-      #     # если есть общий тестовый набор:
-      #     if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip
+          pip install -r services/requirements.txt
 
       - name: Run pytest
-        run: pytest -q
+        run: |
+          source .venv/bin/activate
+          pytest
 
-
+  # -------------------- 2. Docker compose smoke (CI) --------------------
   compose-build-and-smoke:
     runs-on: ubuntu-latest
     needs: unit-tests
@@ -78,7 +68,7 @@ jobs:
           docker compose logs
           exit 1
 
-      - name: Smoke test /health via gateway
+      - name: Smoke test /health of all services via gateway
         run: |
           curl -sSf http://localhost:8000/health
           curl -sSf http://localhost:8000/summary || true
@@ -86,3 +76,113 @@ jobs:
       - name: Stop services
         if: always()
         run: docker compose down
+
+      - name: Smoke test auth register/login
+        run: |
+          curl -sSf -X POST http://localhost:8001/register \
+            -H "Content-Type: application/json" \
+            -d '{"username":"ci_user","email":"ci_user@example.com","password":"pass123"}' || true
+
+          curl -sSf -X POST http://localhost:8001/login \
+            -H "Content-Type: application/json" \
+            -d '{"username":"ci_user","password":"pass123"}'
+
+  # -------------------- 3. CD: билд и push Docker-образов --------------------
+  build-and-push-images:
+    name: Build & push Docker images (CD)
+    runs-on: ubuntu-latest
+    needs:
+      - unit-tests
+    # чтобы CD срабатывал только на push в main (а не на PR)
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ---------- auth ----------
+      - name: Build & push auth image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/auth/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/shop_micro-auth:latest
+            ghcr.io/${{ github.repository_owner }}/shop_micro-auth:${{ github.sha }}
+
+      # ---------- users ----------
+      - name: Build & push users image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/users/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/shop_micro-users:latest
+            ghcr.io/${{ github.repository_owner }}/shop_micro-users:${{ github.sha }}
+
+      # ---------- catalog ----------
+      - name: Build & push catalog image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/catalog/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/shop_micro-catalog:latest
+            ghcr.io/${{ github.repository_owner }}/shop_micro-catalog:${{ github.sha }}
+
+      # ---------- orders ----------
+      - name: Build & push orders image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/orders/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/shop_micro-orders:latest
+            ghcr.io/${{ github.repository_owner }}/shop_micro-orders:${{ github.sha }}
+
+      # ---------- notifications ----------
+      - name: Build & push notifications image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/notifications/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/shop_micro-notifications:latest
+            ghcr.io/${{ github.repository_owner }}/shop_micro-notifications:${{ github.sha }}
+
+      # ---------- gateway ----------
+      - name: Build & push gateway image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/gateway/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/shop_micro-gateway:latest
+            ghcr.io/${{ github.repository_owner }}/shop_micro-gateway:${{ github.sha }}
+
+      # ---------- frontend ----------
+      - name: Build & push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: services/frontend/Dockerfile
+          push: true gg
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/shop_micro-frontend:latest
+            ghcr.io/${{ github.repository_owner }}/shop_micro-frontend:${{ github.sha }}
